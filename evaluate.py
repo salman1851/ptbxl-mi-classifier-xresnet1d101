@@ -1,16 +1,16 @@
 import os
+import csv
 import json
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
-from sklearn.metrics import (confusion_matrix, roc_curve, roc_auc_score,
-                             precision_recall_curve, average_precision_score)
+from sklearn.metrics import (confusion_matrix, roc_curve, roc_auc_score, auc,
+                             precision_recall_curve)
 from dataset import ECGDataset
 from params import *
 from xresnet1d import xresnet1d101
 
-import csv
 
 def _div(a, b):
     """Safe division: nan instead of a crash when a class has an empty denominator."""
@@ -60,7 +60,9 @@ def _compute_metrics(probs, labels, class_names):
         ppv = _div(tp, tp + fp)    # precision
         npv = _div(tn, tn + fn)
 
-        y_bin = (labels == k).astype(int)   # threshold-free metrics use the probabilities
+        # threshold-free metrics use the probabilities, not the argmax predictions
+        y_bin = (labels == k).astype(int)
+        prec, rec, _ = precision_recall_curve(y_bin, probs[:, k])
         per_class[name] = {
             "support": int(tp + fn),
             "prevalence": float((tp + fn) / total),
@@ -70,11 +72,11 @@ def _compute_metrics(probs, labels, class_names):
             "npv": npv,
             "f1": _div(2 * ppv * sens, ppv + sens),
             "auc": float(roc_auc_score(y_bin, probs[:, k])),
-            "ap": float(average_precision_score(y_bin, probs[:, k])),
+            "auprc": float(auc(rec, prec)),   # trapezoidal area under the PR curve
         }
 
     # macro = unweighted mean over classes, so "normal" can't dominate
-    metric_names = ["sensitivity", "specificity", "ppv", "npv", "f1", "auc", "ap"]
+    metric_names = ["sensitivity", "specificity", "ppv", "npv", "f1", "auc", "auprc"]
     macro = {m: float(np.nanmean([per_class[n][m] for n in class_names])) for m in metric_names}
     overall = {
         "accuracy": float(np.trace(cm) / total),
@@ -122,14 +124,15 @@ def _plot_roc_pr(probs, labels, per_class, class_names, path):
         ax_roc.plot(1 - m["specificity"], m["sensitivity"], "o", color=c, markeredgecolor="black")
 
         prec, rec, _ = precision_recall_curve(y_bin, probs[:, k])
-        ax_pr.plot(rec, prec, color=c, label=f"{name} (AP {m['ap']:.3f})")
+        ax_pr.plot(rec, prec, color=c, label=f"{name} (AUPRC {m['auprc']:.3f})")
         ax_pr.plot(m["sensitivity"], m["ppv"], "o", color=c, markeredgecolor="black")
         ax_pr.axhline(m["prevalence"], color=c, ls=":", lw=1)   # no-skill baseline = prevalence
 
+    # Legend-only entries; the order added here is the order shown in the legend
     ax_roc.plot([0, 1], [0, 1], color="gray", ls="--", lw=1, label="Chance")
-    for ax in (ax_roc, ax_pr):   # legend entry explaining the dots
-        ax.plot([], [], "o", color="gray", markeredgecolor="black", label="Operating point (argmax)")
+    ax_roc.plot([], [], "o", color="gray", markeredgecolor="black", label="Operating point (argmax)")
     ax_pr.plot([], [], color="gray", ls=":", label="No-skill baseline (prevalence)")
+    ax_pr.plot([], [], "o", color="gray", markeredgecolor="black", label="Operating point (argmax)")
 
     ax_roc.set(xlabel="False positive rate (1 - specificity)", ylabel="True positive rate (sensitivity)",
                title="ROC (one-vs-rest)", xlim=(0, 1), ylim=(0, 1.02))
@@ -142,10 +145,11 @@ def _plot_roc_pr(probs, labels, per_class, class_names, path):
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
+
 def _save_csv(path, class_names, per_class, macro, overall):
     """Write the console table to CSV: one row per class plus a macro row.
     The three overall scores are filled in on the macro row only."""
-    metric_cols = ["sensitivity", "specificity", "ppv", "npv", "f1", "auc", "ap"]
+    metric_cols = ["sensitivity", "specificity", "ppv", "npv", "f1", "auc", "auprc"]
     header = ["class", "n"] + metric_cols + ["accuracy", "balanced_accuracy", "macro_f1"]
 
     def fmt(v):   # nan -> empty cell
@@ -161,6 +165,7 @@ def _save_csv(path, class_names, per_class, macro, overall):
         w.writerow(["macro", n_total] + [fmt(macro[c]) for c in metric_cols]
                    + [fmt(overall["accuracy"]), fmt(overall["balanced_accuracy"]), fmt(overall["macro_f1"])])
 
+
 def evaluate(out_dir, split="test", batch_size=BATCH_SIZE):
     """
     Evaluate out_dir/best_model_checkpoint.pt on one split of PROCESSED_DATA_DIR.
@@ -169,7 +174,8 @@ def evaluate(out_dir, split="test", batch_size=BATCH_SIZE):
     split:   "test" (final report) or "val" (model selection / sanity checks)
 
     Writes into out_dir/eval_<split>/:
-      probs.npy, labels.npy, metrics.json, confusion_matrices.png, roc_pr.png
+      probs.npy, labels.npy, metrics.json, metrics_table.csv,
+      confusion_matrices.png, roc_pr.png
     and returns the metrics dict.
     """
     eval_dir = os.path.join(out_dir, f"eval_{split}")
@@ -212,13 +218,13 @@ def evaluate(out_dir, split="test", batch_size=BATCH_SIZE):
 
     # --- console summary ---
     print(f"\nEvaluation on '{split}' set ({len(labels)} samples)")
-    print(f"{'class':<16}{'n':>6}{'sens':>8}{'spec':>8}{'PPV':>8}{'NPV':>8}{'F1':>8}{'AUC':>8}{'AP':>8}")
+    print(f"{'class':<16}{'n':>6}{'sens':>8}{'spec':>8}{'PPV':>8}{'NPV':>8}{'F1':>8}{'AUC':>8}{'AUPRC':>8}")
     for name in class_names:
         m = per_class[name]
         print(f"{name:<16}{m['support']:>6}{m['sensitivity']:>8.3f}{m['specificity']:>8.3f}"
-              f"{m['ppv']:>8.3f}{m['npv']:>8.3f}{m['f1']:>8.3f}{m['auc']:>8.3f}{m['ap']:>8.3f}")
+              f"{m['ppv']:>8.3f}{m['npv']:>8.3f}{m['f1']:>8.3f}{m['auc']:>8.3f}{m['auprc']:>8.3f}")
     print(f"{'macro':<16}{'':>6}{macro['sensitivity']:>8.3f}{macro['specificity']:>8.3f}"
-          f"{macro['ppv']:>8.3f}{macro['npv']:>8.3f}{macro['f1']:>8.3f}{macro['auc']:>8.3f}{macro['ap']:>8.3f}")
+          f"{macro['ppv']:>8.3f}{macro['npv']:>8.3f}{macro['f1']:>8.3f}{macro['auc']:>8.3f}{macro['auprc']:>8.3f}")
     print(f"accuracy = {overall['accuracy']:.4f}, balanced accuracy = {overall['balanced_accuracy']:.4f}, "
           f"macro-F1 = {overall['macro_f1']:.4f}")
 
