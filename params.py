@@ -1,0 +1,14 @@
+DATA_PATH = "data/dataset/"
+PROCESSED_DATA_DIR = "data/processed/"
+CLASS_MAP = {"acute-subacute": 0, "chronic": 1, "normal": 2}
+MODEL_DEPTH = "xresnet1d101"
+IN_CH = 12
+SEQ_LEN = 5000
+NUM_CLASSES = 3
+STEM_K = 7
+BLOCK_K = 5 
+TRAIN_VAL_TEST = (0.8, 0.1, 0.1)
+RANDOM_SEED = 42
+BATCH_SIZE = 64
+LEARNING_RATE = 1e-4
+EPOCHS = 20
