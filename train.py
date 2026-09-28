@@ -9,17 +9,18 @@ from params import *
 from xresnet1d import xresnet1d101
 
 
-def train(out_dir, fc_drop=0.25, lr=LEARNING_RATE, epochs=EPOCHS,
-          batch_size=BATCH_SIZE, seed=None):
+def train(out_dir, fc_drop=FC_DROP, lr=LEARNING_RATE, epochs=EPOCHS,
+          batch_size=BATCH_SIZE, seed=None, label_smoothing=LABEL_SMOOTHING):
     """
     Train xresnet1d101 on the splits currently in PROCESSED_DATA_DIR.
 
-    out_dir:    folder for this experiment's results (created if missing)
-    fc_drop:    dropout rate in the classifier head
-    lr:         initial learning rate
-    epochs:     number of training epochs (fixed, no early stopping)
-    batch_size: batch size for train and val loaders
-    seed:       torch seed for weight init / dropout / batch order (None = don't seed)
+    out_dir:         folder for this experiment's results (created if missing)
+    fc_drop:         dropout rate in the classifier head
+    lr:              initial learning rate
+    epochs:          number of training epochs (fixed, no early stopping)
+    batch_size:      batch size for train and val loaders
+    seed:            torch seed for weight init / dropout / batch order (None = don't seed)
+    label_smoothing: smoothing used in the training loss only (0.0 = plain cross-entropy)
 
     Writes best_model_checkpoint.pt, last_model_checkpoint.pt and history.json
     into out_dir, and returns the history dict.
@@ -45,12 +46,16 @@ def train(out_dir, fc_drop=0.25, lr=LEARNING_RATE, epochs=EPOCHS,
     model = model.to(device)
 
     # -----------------------------------------------------------------------
-    # Optimizer, LR scheduler, loss
+    # Optimizer, LR scheduler, losses
     # -----------------------------------------------------------------------
     opt = torch.optim.AdamW(model.parameters(), lr=lr)  # weight_decay left at the 0.01 default
     # Cut LR by 10x when val loss hasn't improved for 5 consecutive epochs
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='min', factor=0.1, patience=5)
-    criterion = nn.CrossEntropyLoss()  # expects raw logits + integer class targets
+
+    # Two losses: the smoothed one is what the model optimizes; the plain one is what we
+    # log and validate with, so loss curves stay comparable to runs without smoothing.
+    criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+    plain_criterion = nn.CrossEntropyLoss()
 
     # -----------------------------------------------------------------------
     # Bookkeeping
@@ -62,7 +67,8 @@ def train(out_dir, fc_drop=0.25, lr=LEARNING_RATE, epochs=EPOCHS,
     # "config" records this run's settings so the folder is self-describing.
     history = {
         "config": {"fc_drop": fc_drop, "lr": lr, "epochs": epochs,
-                   "batch_size": batch_size, "seed": seed},
+                   "batch_size": batch_size, "seed": seed,
+                   "label_smoothing": label_smoothing},
         "train_loss": [], "train_acc": [],
         "val_loss": [],   "val_acc": [],
         "lr": [],
@@ -84,11 +90,12 @@ def train(out_dir, fc_drop=0.25, lr=LEARNING_RATE, epochs=EPOCHS,
             xb, yb = xb.to(device), yb.to(device)
             opt.zero_grad()                         # clear gradients from the previous batch
             out = model(xb)                         # logits, shape (batch, NUM_CLASSES)
-            train_loss = criterion(out, yb)
-            train_loss.backward()
+            loss = criterion(out, yb)               # smoothed loss drives the gradients
+            loss.backward()
             opt.step()
+            plain_loss = plain_criterion(out.detach(), yb)   # plain loss for logging (no extra forward pass)
             # Weight by batch size so the epoch average is exact even if the last batch is smaller
-            running_train_loss += train_loss.item() * xb.size(0)
+            running_train_loss += plain_loss.item() * xb.size(0)
             correct_train += (out.argmax(dim=1) == yb).sum().item()
             total_train += yb.size(0)
         avg_train_loss = running_train_loss / len(train_set)
@@ -103,7 +110,7 @@ def train(out_dir, fc_drop=0.25, lr=LEARNING_RATE, epochs=EPOCHS,
             for xb, yb in val_:
                 xb, yb = xb.to(device), yb.to(device)
                 out = model(xb)
-                val_loss = criterion(out, yb)
+                val_loss = plain_criterion(out, yb)   # always plain, never smoothed
                 running_val_loss += val_loss.item() * xb.size(0)
                 correct_val += (out.argmax(dim=1) == yb).sum().item()
                 total_val += yb.size(0)
