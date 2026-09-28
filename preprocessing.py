@@ -1,34 +1,55 @@
-import numpy as np
 import os
+import glob
+import numpy as np
 from sklearn.model_selection import train_test_split
 from params import *
-import glob
 
-# load and stack numpy arrays
-X, y = [], []
-for cls_name, cls_id in CLASS_MAP.items():
-	npy_file_list = glob.glob(DATA_PATH + cls_name + "/*.npy")
-	for f in npy_file_list:
-		sig = np.load(f).astype(np.float32)
-		sig = sig.T # transpose to the canonical "channels x samples" format
-		X.append(sig)
-		y.append(cls_id)
-X = np.array(X)
-y = np.array(y)
 
-# split into train, test and validation
-X_temp, X_test, y_temp, y_test = train_test_split(X, y, random_state = RANDOM_SEED, stratify = y, test_size=TRAIN_VAL_TEST[2])
-val_ratio = TRAIN_VAL_TEST[1] / (TRAIN_VAL_TEST[0] + TRAIN_VAL_TEST[1])  
-X_train, X_val, y_train, y_val = train_test_split(X_temp, y_temp, random_state = RANDOM_SEED, stratify = y_temp, test_size=val_ratio)
+def preprocess(seed=RANDOM_SEED):
+    """
+    Load the raw signals, make a stratified train/val/test split and write
+    the six .npy files into PROCESSED_DATA_DIR, overwriting any existing ones.
 
-# print(len(X_train)/len(X), len(X_val)/len(X), len(X_test)/len(X))
+    seed: random seed for the split (a fresh split per experiment = a different seed)
 
-# save as npy file in 'processed folder'
-if not os.path.exists(PROCESSED_DATA_DIR):
-	os.makedirs(PROCESSED_DATA_DIR)
-np.save(PROCESSED_DATA_DIR+'X_train', X_train)
-np.save(PROCESSED_DATA_DIR+'y_train', y_train)
-np.save(PROCESSED_DATA_DIR+'X_val', X_val)
-np.save(PROCESSED_DATA_DIR+'y_val', y_val)
-np.save(PROCESSED_DATA_DIR+'X_test', X_test)
-np.save(PROCESSED_DATA_DIR+'y_test', y_test)
+    Returns the per-class sample counts of each split, e.g.
+    {"train": [n_class0, n_class1, n_class2], "val": [...], "test": [...]}.
+    """
+    # --- collect file paths and integer labels ---
+    files, labels = [], []
+    for cls_name, cls_id in CLASS_MAP.items():
+        cls_files = glob.glob(os.path.join(DATA_PATH, cls_name, "*.npy"))
+        files += cls_files
+        labels += [cls_id] * len(cls_files)
+    assert len(files) > 0, f"no .npy files found under {DATA_PATH}"
+    y = np.array(labels)
+
+    # --- load into one preallocated float32 array (no list -> array copy) ---
+    X = np.empty((len(files), IN_CH, SEQ_LEN), dtype=np.float32)
+    for i, f in enumerate(files):
+        sig = np.load(f).astype(np.float32).T   # raw files are (5000, 12); transpose to (12, 5000)
+        assert sig.shape == (IN_CH, SEQ_LEN), f"unexpected shape {sig.shape} in {f}"
+        X[i] = sig
+
+    # --- stratified split on indices (train / val / test) ---
+    idx = np.arange(len(y))
+    idx_temp, idx_test = train_test_split(
+        idx, test_size=TRAIN_VAL_TEST[2], stratify=y, random_state=seed)
+    val_ratio = TRAIN_VAL_TEST[1] / (TRAIN_VAL_TEST[0] + TRAIN_VAL_TEST[1])  # val's share of the remainder
+    idx_train, idx_val = train_test_split(
+        idx_temp, test_size=val_ratio, stratify=y[idx_temp], random_state=seed)
+
+    # --- save one split at a time; np.save overwrites existing files ---
+    os.makedirs(PROCESSED_DATA_DIR, exist_ok=True)
+    counts = {}
+    for name, split_idx in [("train", idx_train), ("val", idx_val), ("test", idx_test)]:
+        np.save(os.path.join(PROCESSED_DATA_DIR, f"X_{name}.npy"), X[split_idx])
+        np.save(os.path.join(PROCESSED_DATA_DIR, f"y_{name}.npy"), y[split_idx])
+        counts[name] = np.bincount(y[split_idx], minlength=NUM_CLASSES).tolist()
+
+    del X   # release the big array before training allocates
+    return counts
+
+
+if __name__ == "__main__":
+    print(preprocess())
