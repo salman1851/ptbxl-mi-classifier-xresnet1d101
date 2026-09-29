@@ -8,9 +8,10 @@ from preprocessing import preprocess
 from train import train
 from visualize_history import plot_loss_history, plot_accuracy_history
 from evaluate import evaluate
+from performance import summarize_runs, bootstrap_ci
 
 
-def run_experiments():
+def run_experiments(run_aggregation=False):
     # one time-stamped folder per invocation, one subfolder per experiment
     run_dir = os.path.join("results", datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
     os.makedirs(run_dir, exist_ok=True)
@@ -44,6 +45,17 @@ def run_experiments():
             with open(os.path.join(out_dir, "FAILED.txt"), "w") as f:
                 f.write(traceback.format_exc())
 
+    if run_aggregation:
+        print("\n===== Aggregating results across runs =====")
+        try:
+            rows, median_run = summarize_runs(run_dir, split="val")
+            bootstrap_ci(os.path.join(run_dir, median_run), split="test")
+        except Exception:
+            traceback.print_exc()
+            print(f"Aggregation failed, but individual experiment results remain in {run_dir}")
+
+    return run_dir
+
 
 if __name__ == "__main__":
-    run_experiments()
+    run_experiments(run_aggregation=True)
