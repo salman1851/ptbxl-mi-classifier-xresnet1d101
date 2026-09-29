@@ -6,12 +6,13 @@ import torch.optim
 from torch.utils.data import DataLoader
 from dataset import ECGDataset
 from params import *
-from xresnet1d import xresnet1d101
+from xresnet1d import xresnet1d50, xresnet1d101
 
+MODEL_FACTORY = {"xresnet1d50": xresnet1d50, "xresnet1d101": xresnet1d101}
 
 def train(out_dir, fc_drop=FC_DROP, lr=LEARNING_RATE, epochs=EPOCHS,
           batch_size=BATCH_SIZE, seed=None, label_smoothing=LABEL_SMOOTHING,
-          weight_decay=WEIGHT_DECAY):
+          weight_decay=WEIGHT_DECAY, model_depth=MODEL_DEPTH):
     """
     Train xresnet1d101 on the splits currently in PROCESSED_DATA_DIR.
 
@@ -42,8 +43,8 @@ def train(out_dir, fc_drop=FC_DROP, lr=LEARNING_RATE, epochs=EPOCHS,
     # Device and model
     # -----------------------------------------------------------------------
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = xresnet1d101(in_ch=IN_CH, c_out=NUM_CLASSES, stem_k=STEM_K,
-                         block_k=BLOCK_K, fc_drop=fc_drop)
+    model = MODEL_FACTORY[model_depth](in_ch=IN_CH, c_out=NUM_CLASSES, stem_k=STEM_K,
+                                        block_k=BLOCK_K, fc_drop=fc_drop)
     model = model.to(device)
 
     # -----------------------------------------------------------------------
@@ -67,8 +68,8 @@ def train(out_dir, fc_drop=FC_DROP, lr=LEARNING_RATE, epochs=EPOCHS,
     # Per-epoch history, written to out_dir/history.json.
     # "config" records this run's settings so the folder is self-describing.
     history = {
-        "config": {"fc_drop": fc_drop, "lr": lr, "epochs": epochs,
-                   "batch_size": batch_size, "seed": seed,
+        "config": {"model_depth": model_depth, "fc_drop": fc_drop, "lr": lr,
+                   "epochs": epochs, "batch_size": batch_size, "seed": seed,
                    "label_smoothing": label_smoothing, "weight_decay": weight_decay},
         "train_loss": [], "train_acc": [],
         "val_loss": [],   "val_acc": [],

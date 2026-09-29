@@ -167,6 +167,10 @@ def xresnet1d101(**kwargs):
     return XResNet1d(4, [3, 4, 23, 3], stem_k=kwargs.pop('stem_k', 7),
                       block_k=kwargs.pop('block_k', 5), **kwargs)
 
+def xresnet1d50(**kwargs):
+    return XResNet1d(4, [3, 4, 6, 3], stem_k=kwargs.pop('stem_k', 7),
+                      block_k=kwargs.pop('block_k', 5), **kwargs)
+
 ##### sanity check #####
 # model = xresnet1d101(in_ch=IN_CH, c_out=NUM_CLASSES, stem_k=STEM_K, block_k=BLOCK_K)
 # x = torch.randn(BATCH_SIZE, IN_CH, 5000)

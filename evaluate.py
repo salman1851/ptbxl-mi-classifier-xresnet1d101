@@ -9,8 +9,9 @@ from sklearn.metrics import (confusion_matrix, roc_curve, roc_auc_score, auc,
                              precision_recall_curve)
 from dataset import ECGDataset
 from params import *
-from xresnet1d import xresnet1d101
+from xresnet1d import xresnet1d50, xresnet1d101
 
+MODEL_FACTORY = {"xresnet1d50": xresnet1d50, "xresnet1d101": xresnet1d101}
 
 def _div(a, b):
     """Safe division: nan instead of a crash when a class has an empty denominator."""
@@ -185,7 +186,9 @@ def evaluate(out_dir, split="test", batch_size=BATCH_SIZE):
     # --- load best checkpoint (dropout has no weights, so fc_drop doesn't matter here) ---
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     ckpt_path = os.path.join(out_dir, "best_model_checkpoint.pt")
-    model = xresnet1d101(in_ch=IN_CH, c_out=NUM_CLASSES, stem_k=STEM_K, block_k=BLOCK_K)
+    with open(os.path.join(out_dir, "history.json")) as f:
+        model_depth = json.load(f)["config"]["model_depth"]
+    model = MODEL_FACTORY[model_depth](in_ch=IN_CH, c_out=NUM_CLASSES, stem_k=STEM_K, block_k=BLOCK_K)
     model.load_state_dict(torch.load(ckpt_path, map_location=device))
     model = model.to(device)
 
