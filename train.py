@@ -10,7 +10,8 @@ from xresnet1d import xresnet1d101
 
 
 def train(out_dir, fc_drop=FC_DROP, lr=LEARNING_RATE, epochs=EPOCHS,
-          batch_size=BATCH_SIZE, seed=None, label_smoothing=LABEL_SMOOTHING):
+          batch_size=BATCH_SIZE, seed=None, label_smoothing=LABEL_SMOOTHING,
+          weight_decay=WEIGHT_DECAY):
     """
     Train xresnet1d101 on the splits currently in PROCESSED_DATA_DIR.
 
@@ -48,7 +49,7 @@ def train(out_dir, fc_drop=FC_DROP, lr=LEARNING_RATE, epochs=EPOCHS,
     # -----------------------------------------------------------------------
     # Optimizer, LR scheduler, losses
     # -----------------------------------------------------------------------
-    opt = torch.optim.AdamW(model.parameters(), lr=lr)  # weight_decay left at the 0.01 default
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     # Cut LR by 10x when val loss hasn't improved for 5 consecutive epochs
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='min', factor=0.1, patience=5)
 
@@ -68,7 +69,7 @@ def train(out_dir, fc_drop=FC_DROP, lr=LEARNING_RATE, epochs=EPOCHS,
     history = {
         "config": {"fc_drop": fc_drop, "lr": lr, "epochs": epochs,
                    "batch_size": batch_size, "seed": seed,
-                   "label_smoothing": label_smoothing},
+                   "label_smoothing": label_smoothing, "weight_decay": weight_decay},
         "train_loss": [], "train_acc": [],
         "val_loss": [],   "val_acc": [],
         "lr": [],
