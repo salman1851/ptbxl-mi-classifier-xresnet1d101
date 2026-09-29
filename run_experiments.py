@@ -6,7 +6,7 @@ from datetime import datetime
 from params import *
 from preprocessing import preprocess
 from train import train
-from visualize_history import plot_history
+from visualize_history import plot_loss_history, plot_accuracy_history
 from evaluate import evaluate
 
 
@@ -30,9 +30,11 @@ def run_experiments():
 
             print("Training...")
             train(out_dir, seed=seed)               # all other settings come from params.py
+
             print("Logging history...")
-            plot_history(os.path.join(out_dir, "history.json"),
-                         os.path.join(out_dir, "history_plot.png"))
+            plot_loss_history(os.path.join(out_dir, "history.json"), os.path.join(out_dir, "loss_plot.png"))
+            plot_accuracy_history(os.path.join(out_dir, "history.json"), os.path.join(out_dir, "accuracy_plot.png"))
+            
             print("Evaluating...")
             evaluate(out_dir, split="val")          # val for comparing runs
             evaluate(out_dir, split="test")         # test for the final report
