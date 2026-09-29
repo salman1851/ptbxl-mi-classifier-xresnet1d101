@@ -5,7 +5,15 @@ import numpy as np
 from params import *
 from evaluate import _compute_metrics, _clean
 
+import re
+
 CLASS_NAMES = sorted(CLASS_MAP, key=CLASS_MAP.get)   # names ordered by integer label
+
+
+def _natural_key(name):
+    """Sort 'exp_2' before 'exp_10' by extracting the trailing integer, if any."""
+    match = re.search(r'(\d+)$', name)
+    return (0, int(match.group(1))) if match else (1, name)
 
 
 def summarize_runs(results_dir, split="val"):
@@ -26,7 +34,7 @@ def summarize_runs(results_dir, split="val"):
     and median_run_name is the subfolder name of the representative run.
     """
     rows = []
-    for name in sorted(os.listdir(results_dir)):
+    for name in sorted(os.listdir(results_dir), key=_natural_key):
         exp_dir = os.path.join(results_dir, name)
         history_path = os.path.join(exp_dir, "history.json")
         metrics_path = os.path.join(exp_dir, f"eval_{split}", "metrics.json")
