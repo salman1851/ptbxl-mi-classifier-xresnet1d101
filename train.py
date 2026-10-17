@@ -57,9 +57,10 @@ def train(out_dir, fc_drop=FC_DROP, lr=LEARNING_RATE, epochs=EPOCHS,
 
     # --- class weights, computed once from this run's actual training labels ---
     class_counts = np.bincount(train_set.labels, minlength=NUM_CLASSES)
-    class_weights = torch.tensor(1.0 / class_counts, dtype=torch.float32)
-    class_weights = class_weights / class_weights.sum() * NUM_CLASSES   # normalize to mean 1
+    class_weights = torch.tensor(1.0 / np.sqrt(class_counts), dtype=torch.float32)
+    class_weights = class_weights / class_weights.sum() * NUM_CLASSES
     class_weights = class_weights.to(device)
+    print(class_weights)
 
     # Two losses: the smoothed one is what the model optimizes; the plain one is what we
     # log and validate with, so loss curves stay comparable to runs without smoothing.

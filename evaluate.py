@@ -10,6 +10,7 @@ from sklearn.metrics import (confusion_matrix, roc_curve, roc_auc_score, auc,
 from dataset import ECGDataset
 from params import *
 from xresnet1d import xresnet1d50, xresnet1d101
+from matplotlib.colors import PowerNorm
 
 MODEL_FACTORY = {"xresnet1d50": xresnet1d50, "xresnet1d101": xresnet1d101}
 
@@ -88,13 +89,20 @@ def _compute_metrics(probs, labels, class_names):
 
 
 def _plot_confusion(cm, class_names, path):
-    """Two panels: raw counts, and row-normalized (diagonal = per-class recall)."""
+    """Two panels: raw counts (power-law color scale), and row-normalized (recall)."""
     cm_norm = cm / cm.sum(axis=1, keepdims=True)
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
-    panels = [(axes[0], cm, "Counts", "d", cm.max()),
-              (axes[1], cm_norm, "Row-normalized (recall)", ".2f", 1.0)]
-    for ax, data, title, fmt, vmax in panels:
-        im = ax.imshow(data, cmap="Blues", vmin=0, vmax=vmax)
+
+    # Counts panel: PowerNorm compresses the huge dynamic range (handles 0s fine, unlike LogNorm)
+    count_norm = PowerNorm(gamma=0.4, vmin=0, vmax=cm.max())
+    panels = [(axes[0], cm, "Counts", "d", count_norm),
+              (axes[1], cm_norm, "Row-normalized (recall)", ".2f", None)]
+
+    for ax, data, title, fmt, norm in panels:
+        if norm is not None:
+            im = ax.imshow(data, cmap="Blues", norm=norm)
+        else:
+            im = ax.imshow(data, cmap="Blues", vmin=0, vmax=1.0)
         ax.set_xticks(range(len(class_names)))
         ax.set_yticks(range(len(class_names)))
         ax.set_xticklabels(class_names, rotation=30, ha="right")
@@ -104,8 +112,11 @@ def _plot_confusion(cm, class_names, path):
         ax.set_title(title)
         for i in range(data.shape[0]):
             for j in range(data.shape[1]):
+                # text color based on the NORMALIZED intensity, not the raw value,
+                # so it stays correct under the nonlinear color scale
+                intensity = norm(data[i, j]) if norm is not None else data[i, j]
                 ax.text(j, i, format(data[i, j], fmt), ha="center", va="center",
-                        color="white" if data[i, j] > vmax / 2 else "black")
+                        color="white" if intensity > 0.5 else "black")
         fig.colorbar(im, ax=ax, fraction=0.046)
     fig.tight_layout()
     fig.savefig(path, dpi=150, bbox_inches="tight")
