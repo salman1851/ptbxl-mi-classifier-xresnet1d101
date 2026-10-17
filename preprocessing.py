@@ -7,24 +7,20 @@ from params import *
 
 def preprocess(seed=RANDOM_SEED):
     """
-    Load the raw signals, cap the "normal" class at NORMAL_SAMPLE_SIZE, make a
-    stratified train/val/test split, and write the six .npy files into
-    PROCESSED_DATA_DIR, overwriting any existing ones.
+    Load the raw signals, make a stratified train/val/test split, and write the
+    six .npy files into PROCESSED_DATA_DIR, overwriting any existing ones.
 
-    seed: random seed for both the normal-class subsample and the split
-          (a fresh seed per experiment = a different subsample and split)
+    seed: random seed for the split (a fresh seed per experiment = a different split)
 
     Returns the per-class sample counts of each split, e.g.
     {"train": [n_class0, n_class1, n_class2], "val": [...], "test": [...]}.
     """
     rng = np.random.default_rng(seed)
 
-    # --- collect file paths and integer labels, capping the "normal" class ---
+    # --- collect file paths and integer labels (no capping) ---
     files, labels = [], []
     for cls_name, cls_id in CLASS_MAP.items():
         cls_files = glob.glob(os.path.join(DATA_PATH, cls_name, "*.npy"))
-        if cls_name == "normal" and len(cls_files) > NORMAL_SAMPLE_SIZE:
-            cls_files = rng.choice(cls_files, size=NORMAL_SAMPLE_SIZE, replace=False).tolist()
         files += cls_files
         labels += [cls_id] * len(cls_files)
     assert len(files) > 0, f"no .npy files found under {DATA_PATH}"

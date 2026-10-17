@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from dataset import ECGDataset
 from params import *
 from xresnet1d import xresnet1d50, xresnet1d101
+import numpy as np
 
 MODEL_FACTORY = {"xresnet1d50": xresnet1d50, "xresnet1d101": xresnet1d101}
 
@@ -54,10 +55,16 @@ def train(out_dir, fc_drop=FC_DROP, lr=LEARNING_RATE, epochs=EPOCHS,
     # Cut LR by 10x when val loss hasn't improved for 5 consecutive epochs
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='min', factor=0.1, patience=5)
 
+    # --- class weights, computed once from this run's actual training labels ---
+    class_counts = np.bincount(train_set.labels, minlength=NUM_CLASSES)
+    class_weights = torch.tensor(1.0 / class_counts, dtype=torch.float32)
+    class_weights = class_weights / class_weights.sum() * NUM_CLASSES   # normalize to mean 1
+    class_weights = class_weights.to(device)
+
     # Two losses: the smoothed one is what the model optimizes; the plain one is what we
     # log and validate with, so loss curves stay comparable to runs without smoothing.
-    criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
-    plain_criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=label_smoothing)
+    plain_criterion = nn.CrossEntropyLoss(weight=class_weights)   # no smoothing, used for val + logged train loss
 
     # -----------------------------------------------------------------------
     # Bookkeeping
@@ -70,7 +77,8 @@ def train(out_dir, fc_drop=FC_DROP, lr=LEARNING_RATE, epochs=EPOCHS,
     history = {
         "config": {"model_depth": model_depth, "fc_drop": fc_drop, "lr": lr,
                    "epochs": epochs, "batch_size": batch_size, "seed": seed,
-                   "label_smoothing": label_smoothing, "weight_decay": weight_decay},
+                   "label_smoothing": label_smoothing, "weight_decay": weight_decay,
+                   "class_weights": class_weights.cpu().tolist()},
         "train_loss": [], "train_acc": [],
         "val_loss": [],   "val_acc": [],
         "lr": [],
