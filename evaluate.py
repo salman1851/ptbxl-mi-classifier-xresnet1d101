@@ -89,35 +89,46 @@ def _compute_metrics(probs, labels, class_names):
 
 
 def _plot_confusion(cm, class_names, path):
-    """Two panels: raw counts (power-law color scale), and row-normalized (recall)."""
+    """Two panels: counts on a plain grid (support reference, no color-mapped
+    heatmap -- counts span too wide a range under class imbalance to color
+    meaningfully), and row-normalized (recall), which is the heatmap that
+    actually carries color-coded information."""
     cm_norm = cm / cm.sum(axis=1, keepdims=True)
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
+    n = len(class_names)
 
-    # Counts panel: PowerNorm compresses the huge dynamic range (handles 0s fine, unlike LogNorm)
-    count_norm = PowerNorm(gamma=0.4, vmin=0, vmax=cm.max())
-    panels = [(axes[0], cm, "Counts", "d", count_norm),
-              (axes[1], cm_norm, "Row-normalized (recall)", ".2f", None)]
+    # --- left panel: counts, plain grid, no heatmap ---
+    ax = axes[0]
+    ax.set_xlim(-0.5, n - 0.5)
+    ax.set_ylim(n - 0.5, -0.5)   # row 0 at top, matching imshow's orientation
+    ax.set_aspect("equal")
+    for i in range(n):
+        for j in range(n):
+            ax.text(j, i, format(cm[i, j], "d"), ha="center", va="center", color="black")
+    ax.set_xticks(range(n)); ax.set_yticks(range(n))
+    ax.set_xticklabels(class_names, rotation=30, ha="right")
+    ax.set_yticklabels(class_names)
+    ax.set_xticks(np.arange(-0.5, n, 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, n, 1), minor=True)
+    ax.grid(which="minor", color="lightgray", linewidth=0.8)
+    ax.tick_params(which="minor", length=0)
+    ax.set_xlabel("Predicted"); ax.set_ylabel("True")
+    ax.set_title("Counts")
 
-    for ax, data, title, fmt, norm in panels:
-        if norm is not None:
-            im = ax.imshow(data, cmap="Blues", norm=norm)
-        else:
-            im = ax.imshow(data, cmap="Blues", vmin=0, vmax=1.0)
-        ax.set_xticks(range(len(class_names)))
-        ax.set_yticks(range(len(class_names)))
-        ax.set_xticklabels(class_names, rotation=30, ha="right")
-        ax.set_yticklabels(class_names)
-        ax.set_xlabel("Predicted")
-        ax.set_ylabel("True")
-        ax.set_title(title)
-        for i in range(data.shape[0]):
-            for j in range(data.shape[1]):
-                # text color based on the NORMALIZED intensity, not the raw value,
-                # so it stays correct under the nonlinear color scale
-                intensity = norm(data[i, j]) if norm is not None else data[i, j]
-                ax.text(j, i, format(data[i, j], fmt), ha="center", va="center",
-                        color="white" if intensity > 0.5 else "black")
-        fig.colorbar(im, ax=ax, fraction=0.046)
+    # --- right panel: row-normalized recall, the actual heatmap ---
+    ax = axes[1]
+    im = ax.imshow(cm_norm, cmap="Blues", vmin=0, vmax=1.0)
+    ax.set_xticks(range(n)); ax.set_yticks(range(n))
+    ax.set_xticklabels(class_names, rotation=30, ha="right")
+    ax.set_yticklabels(class_names)
+    ax.set_xlabel("Predicted"); ax.set_ylabel("True")
+    ax.set_title("Row-normalized (recall)")
+    for i in range(n):
+        for j in range(n):
+            ax.text(j, i, format(cm_norm[i, j], ".2f"), ha="center", va="center",
+                    color="white" if cm_norm[i, j] > 0.5 else "black")
+    fig.colorbar(im, ax=ax, fraction=0.046)
+
     fig.tight_layout()
     fig.savefig(path, dpi=150, bbox_inches="tight")
     plt.close(fig)
