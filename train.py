@@ -3,7 +3,7 @@ import json
 import torch
 import torch.nn as nn
 import torch.optim
-from torch.utils.data import DataLoader, WeightedRandomSampler
+from torch.utils.data import DataLoader
 from dataset import ECGDataset
 from params import *
 from xresnet1d import xresnet1d50, xresnet1d101
@@ -25,9 +25,10 @@ def train(out_dir, fc_drop=FC_DROP, lr=LEARNING_RATE, epochs=EPOCHS,
     seed:            torch seed for weight init / dropout / batch order (None = don't seed)
     label_smoothing: smoothing used in the training loss only (0.0 = plain cross-entropy)
 
-    Class imbalance is handled by a WeightedRandomSampler on the training loader
-    (oversamples rare classes so every batch is roughly balanced), not by loss
-    weighting -- the two would double-correct if combined.
+    Class imbalance is handled by sqrt-inverse-frequency class weights on the
+    loss (plain inverse-frequency collapsed the majority class entirely; a
+    WeightedRandomSampler was also tried and reverted -- sqrt loss weighting
+    gave the better balance of recall and precision across classes).
 
     Writes best_model_checkpoint.pt, last_model_checkpoint.pt and history.json
     into out_dir, and returns the history dict.
@@ -41,17 +42,8 @@ def train(out_dir, fc_drop=FC_DROP, lr=LEARNING_RATE, epochs=EPOCHS,
     # -----------------------------------------------------------------------
     train_set = ECGDataset('train')
     val_set = ECGDataset('val')
-
-    # --- weighted sampler: oversample rare classes so every batch is roughly balanced ---
-    class_counts = np.bincount(train_set.labels, minlength=NUM_CLASSES)
-    class_sample_weight = 1.0 / class_counts          # plain inverse frequency, no tunable exponent
-    sample_weights = class_sample_weight[train_set.labels]   # one weight per training sample
-    sampler = WeightedRandomSampler(
-        weights=torch.tensor(sample_weights, dtype=torch.float32),
-        num_samples=len(train_set), replacement=True)
-
-    train_ = DataLoader(train_set, batch_size=batch_size, sampler=sampler)  # sampler replaces shuffle=True
-    val_ = DataLoader(val_set, batch_size=batch_size)   # untouched: reflects the real class distribution
+    train_ = DataLoader(train_set, batch_size=batch_size, shuffle=True)  # shuffle only for training
+    val_ = DataLoader(val_set, batch_size=batch_size)
 
     # -----------------------------------------------------------------------
     # Device and model
@@ -68,11 +60,18 @@ def train(out_dir, fc_drop=FC_DROP, lr=LEARNING_RATE, epochs=EPOCHS,
     # Cut LR by 10x when val loss hasn't improved for 5 consecutive epochs
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode='min', factor=0.1, patience=5)
 
+    # --- class weights, computed once from this run's actual training labels ---
+    # sqrt-inverse-frequency: gentler than plain inverse-frequency, which drove
+    # the acute-to-normal weight ratio to ~62x and collapsed normal's recall to 0.
+    class_counts = np.bincount(train_set.labels, minlength=NUM_CLASSES)
+    class_weights = torch.tensor(1.0 / np.sqrt(class_counts), dtype=torch.float32)
+    class_weights = class_weights / class_weights.sum() * NUM_CLASSES   # normalize to mean 1
+    class_weights = class_weights.to(device)
+
     # Two losses: the smoothed one is what the model optimizes; the plain one is what we
     # log and validate with, so loss curves stay comparable to runs without smoothing.
-    # No class weighting here -- the sampler above already handles imbalance.
-    criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
-    plain_criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=label_smoothing)
+    plain_criterion = nn.CrossEntropyLoss(weight=class_weights)   # no smoothing, used for val + logged train loss
 
     # -----------------------------------------------------------------------
     # Bookkeeping
@@ -86,8 +85,7 @@ def train(out_dir, fc_drop=FC_DROP, lr=LEARNING_RATE, epochs=EPOCHS,
         "config": {"model_depth": model_depth, "fc_drop": fc_drop, "lr": lr,
                    "epochs": epochs, "batch_size": batch_size, "seed": seed,
                    "label_smoothing": label_smoothing, "weight_decay": weight_decay,
-                   "class_counts": class_counts.tolist(),
-                   "sampling": "weighted_random_1_over_count"},
+                   "class_weights": class_weights.cpu().tolist()},
         "train_loss": [], "train_acc": [],
         "val_loss": [],   "val_acc": [],
         "lr": [],
